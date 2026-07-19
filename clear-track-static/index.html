@@ -717,9 +717,9 @@ function ClearTrack() {
     }),
     className: "flex-1 rounded-xl py-2 text-sm font-medium",
     style: {
-      background: todayLog.ateGluten === false ? C.inkSoft : "transparent",
-      color: C.paperDim,
-      border: `1px solid ${C.line}`
+      background: todayLog.ateGluten === false ? C.rust : "transparent",
+      color: todayLog.ateGluten === false ? C.paper : C.paperDim,
+      border: `1px solid ${todayLog.ateGluten === false ? C.rust : C.line}`
     }
   }, "Gluten-free day")), /*#__PURE__*/React.createElement("label", {
     className: "text-sm block",
@@ -765,9 +765,9 @@ function ClearTrack() {
     }),
     className: "flex-1 rounded-xl py-2 text-sm font-medium",
     style: {
-      background: todayLog.wholeFoods === false ? C.inkSoft : "transparent",
-      color: C.paperDim,
-      border: `1px solid ${C.line}`
+      background: todayLog.wholeFoods === false ? C.rust : "transparent",
+      color: todayLog.wholeFoods === false ? C.paper : C.paperDim,
+      border: `1px solid ${todayLog.wholeFoods === false ? C.rust : C.line}`
     }
   }, "Not really"))), /*#__PURE__*/React.createElement("div", {
     className: "rounded-2xl p-5",
@@ -803,9 +803,9 @@ function ClearTrack() {
     }),
     className: "flex-1 rounded-xl py-2 text-sm font-medium",
     style: {
-      background: todayLog.haraHachiBu === false ? C.inkSoft : "transparent",
-      color: todayLog.haraHachiBu === false ? C.paperDim : C.paperDim,
-      border: `1px solid ${C.line}`
+      background: todayLog.haraHachiBu === false ? C.rust : "transparent",
+      color: todayLog.haraHachiBu === false ? C.paper : C.paperDim,
+      border: `1px solid ${todayLog.haraHachiBu === false ? C.rust : C.line}`
     }
   }, "Not today"))), /*#__PURE__*/React.createElement("div", {
     className: "rounded-2xl p-5",

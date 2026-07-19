@@ -1,0 +1,800 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+<meta name="theme-color" content="#1B2430" />
+<title>Clear Track</title>
+<link rel="manifest" href="manifest.json" />
+<script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script crossorigin="anonymous" src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<script src="vendor/supabase.js"></script>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" />
+<style>
+  body { margin:0; background:#1B2430; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<div id="fatal-error" style="display:none; padding:24px; color:#EEE8DB; font-family:monospace; font-size:14px; white-space:pre-wrap;"></div>
+<script>
+  window.addEventListener('error', function (e) {
+    var box = document.getElementById('fatal-error');
+    box.style.display = 'block';
+    box.textContent = 'Something failed to load:\n' + (e.message || e.error || 'unknown error');
+  });
+</script>
+
+<script>
+// ====== FILL THESE IN FROM YOUR SUPABASE PROJECT SETTINGS -> API ======
+window.SUPABASE_URL = "https://kjwqufpplqtcbxrzyccu.supabase.co";
+window.SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imtqd3F1ZnBwbHF0Y2J4cnp5Y2N1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQ0NjAyNjUsImV4cCI6MjEwMDAzNjI2NX0.aX2HP2LOBdXK4f3yS-QhSwQp1SCUhwy5ZJJmNHy7Ryo";
+// ========================================================================
+</script>
+
+<script type="text/babel" data-presets="react">
+const { useState, useEffect, useCallback, useMemo } = React;
+
+// ---- tiny emoji-based icon stand-ins (no icon library needed) ----
+function mkIcon(glyph) {
+  return function IconCmp({ size = 16 }) {
+    return React.createElement(
+      "span",
+      { style: { fontSize: size, lineHeight: 1, display: "inline-block" } },
+      glyph
+    );
+  };
+}
+const Sun = mkIcon("☀️");
+const Moon = mkIcon("🌙");
+const Droplet = mkIcon("💧");
+const Check = mkIcon("✓");
+const Flame = mkIcon("🔥");
+const Sprout = mkIcon("🌱");
+const Coins = mkIcon("🪙");
+const BookOpen = mkIcon("📖");
+const LayoutGrid = mkIcon("▦");
+const ChevronRight = mkIcon("›");
+const X = mkIcon("✕");
+const RefreshCw = mkIcon("↻");
+
+// ---- Supabase client + storage shim matching the window.storage API ----
+const supabaseClient = supabase.createClient(window.SUPABASE_URL, window.SUPABASE_ANON_KEY);
+
+window.storage = {
+  async get(key) {
+    const { data: { user } } = await supabaseClient.auth.getUser();
+    if (!user) throw new Error("Not signed in");
+    const { data, error } = await supabaseClient
+      .from("clear_track_data")
+      .select("value")
+      .eq("user_id", user.id)
+      .eq("key", key)
+      .maybeSingle();
+    if (error) throw error;
+    if (!data) return null;
+    return { key, value: data.value, shared: false };
+  },
+  async set(key, value) {
+    const { data: { user } } = await supabaseClient.auth.getUser();
+    if (!user) throw new Error("Not signed in");
+    const { error } = await supabaseClient
+      .from("clear_track_data")
+      .upsert({ user_id: user.id, key, value, updated_at: new Date().toISOString() });
+    if (error) throw error;
+    return { key, value, shared: false };
+  },
+  async delete(key) {
+    const { data: { user } } = await supabaseClient.auth.getUser();
+    if (!user) throw new Error("Not signed in");
+    const { error } = await supabaseClient
+      .from("clear_track_data")
+      .delete()
+      .eq("user_id", user.id)
+      .eq("key", key);
+    if (error) throw error;
+    return { key, deleted: true, shared: false };
+  },
+  async list(prefix = "") {
+    const { data: { user } } = await supabaseClient.auth.getUser();
+    if (!user) throw new Error("Not signed in");
+    const { data, error } = await supabaseClient
+      .from("clear_track_data")
+      .select("key")
+      .eq("user_id", user.id)
+      .like("key", prefix + "%");
+    if (error) throw error;
+    return { keys: (data || []).map((r) => r.key), prefix, shared: false };
+  },
+};
+
+
+/* ---------- Theme tokens ----------
+  Ink:    #1B2430  (night sky / deep slate)
+  Paper:  #EEE8DB  (worked paper, warmer/grayer than cliché cream)
+  Dawn:   #C97B3D  (harvest amber — primary accent)
+  Field:  #4B5D45  (sage / hedge green)
+  Sky:    #4C6B8A  (dawn blue — sleep & circadian)
+  Rust:   #9A4630  (muted alert)
+------------------------------------ */
+const C = {
+  ink: "#1B2430",
+  inkSoft: "#2A3644",
+  paper: "#EEE8DB",
+  paperDim: "#E3DCCC",
+  dawn: "#C97B3D",
+  dawnSoft: "#E3B383",
+  field: "#4B5D45",
+  fieldSoft: "#7C9074",
+  sky: "#4C6B8A",
+  skySoft: "#8AA6BC",
+  rust: "#9A4630",
+  line: "rgba(27,36,48,0.12)",
+};
+
+const STORAGE_KEY = "clear-track-data";
+
+const REFRAMES = [
+  { title: "The relief was never real", body: "The unease before a drink is largely created by the last one wearing off. Remove the drink and, after a short adjustment, the unease it was 'fixing' goes with it. You're not missing a solution — you're missing the problem." },
+  { title: "This will pass in minutes", body: "A craving is a wave, not a wall. Physiologically it peaks and drops within ten to fifteen minutes whether you act on it or not. You only ever have to get through the peak." },
+  { title: "Nothing is being given up", body: "It's easy to frame this as sacrifice. Flip it: you're not losing a pleasure, you're closing a loop that took energy, sleep, and money and gave back a few numb hours." },
+  { title: "Boredom isn't solved, it's postponed", body: "A drink doesn't resolve stress or flatness — it defers it a few hours, usually with interest. Whatever you're feeling right now will still need dealing with either way. Might as well deal with it sober." },
+  { title: "You're not the exception", body: "The pull to think 'just this once' is the habit talking, not a genuine reassessment. It shows up strongest right at the moments willpower is weakest — evenings, stress, celebration. Expect it, don't negotiate with it." },
+  { title: "Notice what it actually tastes like", body: "Underneath the ritual and the marketing, it's a mildly toxic, faintly bitter liquid. Most of what people are drawn to is the idea of it, not the substance itself." },
+];
+
+const RESEARCH_NOTES = [
+  {
+    title: "Alcohol: where the evidence actually sits",
+    body: "Major health bodies including the WHO have concluded there's no amount of alcohol that's risk-free for cancer — risk rises even at low levels, it just rises faster at higher ones. Whatever the 'a glass of red wine is good for your heart' idea once claimed, more recent, better-controlled research hasn't held that up. Zero is the only intake with no added risk.",
+  },
+  {
+    title: "Gluten: it's genuinely unsettled",
+    body: "A major 2025 review found that in controlled trials, most gluten-attributed symptoms actually track with FODMAPs (fermentable carbs found in wheat and many other foods) or with expectation effects, not gluten itself — though a smaller subset of people do show a real, distinct immune response. Practically: an elimination-and-reintroduction test is more reliable than assuming. Cutting wheat also cuts FODMAPs at the same time, so feeling better gluten-free doesn't confirm which one was the trigger.",
+  },
+];
+
+const MILESTONES = [1, 3, 7, 14, 30, 60, 90, 180, 365];
+
+function todayKey(d = new Date()) {
+  return d.toISOString().slice(0, 10);
+}
+function addDays(dateStr, n) {
+  const d = new Date(dateStr + "T00:00:00");
+  d.setDate(d.getDate() + n);
+  return todayKey(d);
+}
+function daysBetween(a, b) {
+  const d1 = new Date(a + "T00:00:00");
+  const d2 = new Date(b + "T00:00:00");
+  return Math.round((d2 - d1) / 86400000);
+}
+
+function computeStreak(logs, quitDate) {
+  const today = todayKey();
+  const relapseDates = Object.entries(logs)
+    .filter(([, v]) => v.drank)
+    .map(([k]) => k)
+    .sort();
+  const lastRelapse = relapseDates[relapseDates.length - 1];
+  const streakStart = lastRelapse ? addDays(lastRelapse, 1) : quitDate;
+  const streakDays = Math.max(0, daysBetween(streakStart, today) + 1);
+  return { streakDays, streakStart };
+}
+
+const SUPP_DEFAULTS = [
+  { id: "multi", label: "Multivitamin" },
+  { id: "omega3", label: "Omega-3" },
+  { id: "milkthistle", label: "Milk thistle phytosome" },
+  { id: "magnesium", label: "Magnesium" },
+  { id: "probiotic", label: "Probiotic" },
+];
+
+const GROWTH_DEFAULTS = [
+  { id: "read", label: "Read or learned something for 20+ minutes" },
+  { id: "kindness", label: "One deliberate act of kindness" },
+  { id: "focus", label: "Did deep, focused work — no drifting" },
+  { id: "present", label: "Present time with someone who matters, phone away" },
+];
+
+function emptyDay() {
+  return {
+    drank: false,
+    bedTime: "",
+    wakeTime: "",
+    sleepQuality: null,
+    supplements: {},
+    notes: "",
+    haraHachiBu: null,
+    growth: {},
+    monologueThought: "",
+    monologueReframe: "",
+    ateGluten: null,
+    glutenSymptoms: null,
+    wholeFoods: null,
+  };
+}
+
+function ClearTrack() {
+  const [loaded, setLoaded] = useState(false);
+  const [quitDate, setQuitDate] = useState(todayKey());
+  const [weeklySpend, setWeeklySpend] = useState(60);
+  const [logs, setLogs] = useState({});
+  const [tab, setTab] = useState("today");
+  const [reframeOpen, setReframeOpen] = useState(false);
+  const [reframeIdx, setReframeIdx] = useState(0);
+  const [error, setError] = useState(null);
+  const [growthItems, setGrowthItems] = useState(GROWTH_DEFAULTS);
+  const [newGrowthLabel, setNewGrowthLabel] = useState("");
+  const [userName, setUserName] = useState("");
+
+  const tKey = todayKey();
+  const todayLog = logs[tKey] || emptyDay();
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await window.storage.get(STORAGE_KEY);
+        if (res && res.value) {
+          const parsed = JSON.parse(res.value);
+          setQuitDate(parsed.quitDate || todayKey());
+          setWeeklySpend(parsed.weeklySpend ?? 60);
+          setLogs(parsed.logs || {});
+          setGrowthItems(parsed.growthItems && parsed.growthItems.length ? parsed.growthItems : GROWTH_DEFAULTS);
+          setUserName(parsed.userName || "");
+        }
+      } catch (e) {
+        // no existing data yet — that's fine
+      } finally {
+        setLoaded(true);
+      }
+    })();
+  }, []);
+
+  const saveTimer = React.useRef(null);
+  const pendingData = React.useRef(null);
+
+  const doSave = useCallback(async (data, attempt = 1) => {
+    try {
+      const result = await window.storage.set(STORAGE_KEY, JSON.stringify(data));
+      if (!result) throw new Error("empty result");
+      setError(null);
+    } catch (e) {
+      if (attempt < 3) {
+        await new Promise((r) => setTimeout(r, 500 * attempt));
+        return doSave(data, attempt + 1);
+      }
+      setError("Couldn't save — check your connection and try again.");
+    }
+  }, []);
+
+  const persist = useCallback((next) => {
+    pendingData.current = next;
+    if (saveTimer.current) clearTimeout(saveTimer.current);
+    saveTimer.current = setTimeout(() => {
+      doSave(pendingData.current);
+    }, 400);
+  }, [doSave]);
+
+  const updateToday = (patch) => {
+    const next = { ...todayLog, ...patch };
+    const nextLogs = { ...logs, [tKey]: next };
+    setLogs(nextLogs);
+    persist({ quitDate, weeklySpend, logs: nextLogs, growthItems, userName });
+  };
+
+  const toggleSupplement = (id) => {
+    const supplements = { ...todayLog.supplements, [id]: !todayLog.supplements[id] };
+    updateToday({ supplements });
+  };
+
+  const toggleGrowth = (id) => {
+    const growth = { ...todayLog.growth, [id]: !todayLog.growth[id] };
+    updateToday({ growth });
+  };
+
+  const addGrowthItem = () => {
+    const label = newGrowthLabel.trim();
+    if (!label) return;
+    const id = `custom-${Date.now()}`;
+    const next = [...growthItems, { id, label }];
+    setGrowthItems(next);
+    setNewGrowthLabel("");
+    persist({ quitDate, weeklySpend, logs, growthItems: next, userName });
+  };
+
+  const removeGrowthItem = (id) => {
+    const next = growthItems.filter((g) => g.id !== id);
+    setGrowthItems(next);
+    persist({ quitDate, weeklySpend, logs, growthItems: next, userName });
+  };
+
+  const setQuit = (d) => {
+    setQuitDate(d);
+    persist({ quitDate: d, weeklySpend, logs, growthItems, userName });
+  };
+
+  const setSpend = (v) => {
+    setWeeklySpend(v);
+    persist({ quitDate, weeklySpend: v, logs, growthItems, userName });
+  };
+
+  const setName = (v) => {
+    setUserName(v);
+    persist({ quitDate, weeklySpend, logs, growthItems, userName: v });
+  };
+
+  const { streakDays, streakStart } = useMemo(() => computeStreak(logs, quitDate), [logs, quitDate]);
+  const moneySaved = Math.round((weeklySpend / 7) * streakDays);
+  const nextMilestone = MILESTONES.find((m) => m > streakDays) || null;
+
+  const last14 = useMemo(() => {
+    const out = [];
+    for (let i = 13; i >= 0; i--) {
+      const k = addDays(tKey, -i);
+      out.push({ key: k, log: logs[k] });
+    }
+    return out;
+  }, [logs, tKey]);
+
+  if (!loaded) {
+    return (
+      <div style={{ background: C.ink, minHeight: "100vh" }} className="flex items-center justify-center">
+        <RefreshCw className="animate-spin" color={C.paperDim} size={22} />
+      </div>
+    );
+  }
+
+  return (
+    <div style={{ background: C.ink, minHeight: "100vh", fontFamily: "'Source Sans 3', 'Inter', sans-serif" }}>
+      <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=Source+Sans+3:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+        .disp { font-family: 'Fraunces', serif; }
+        .mono { font-family: 'JetBrains Mono', monospace; }
+        input[type=range] { -webkit-appearance:none; height:4px; border-radius:2px; background:${C.line}; }
+        input[type=range]::-webkit-slider-thumb { -webkit-appearance:none; width:16px; height:16px; border-radius:50%; background:${C.dawn}; cursor:pointer; }
+      `}</style>
+
+      <div className="max-w-md mx-auto px-5 pt-8 pb-28">
+        {/* Header */}
+        <div className="flex items-baseline justify-between mb-1">
+          <p className="disp text-base tracking-wide" style={{ color: C.dawnSoft }}>Clear Track</p>
+          <p className="mono text-sm" style={{ color: C.skySoft }}>{new Date().toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short" })}</p>
+        </div>
+
+        {/* Streak hero */}
+        <div className="mt-4 rounded-2xl p-6" style={{ background: C.inkSoft, border: `1px solid ${C.line}` }}>
+          <p className="disp text-7xl leading-none" style={{ color: C.paper }}>{streakDays}</p>
+          <p className="mt-1 text-base" style={{ color: C.paperDim }}>
+            {streakDays === 1 ? "day clear" : "days clear"}
+            {nextMilestone && <span style={{ color: C.dawnSoft }}> · {nextMilestone - streakDays} to go till day {nextMilestone}</span>}
+          </p>
+
+          {/* the field: a sown row of days */}
+          <div className="mt-4 flex flex-wrap gap-1.5">
+            {Array.from({ length: Math.min(streakDays, 60) }).map((_, i) => (
+              <span key={i} style={{ width: 7, height: 7, borderRadius: 2, background: C.dawn, opacity: 0.55 + 0.45 * (i / Math.max(streakDays, 1)) }} />
+            ))}
+            {streakDays > 60 && <span className="mono text-sm ml-1" style={{ color: C.dawnSoft }}>+{streakDays - 60} more</span>}
+            {streakDays === 0 && <span className="text-sm" style={{ color: C.paperDim }}>The row fills in from tomorrow morning.</span>}
+          </div>
+
+          <div className="mt-5 flex items-center gap-2">
+            <Coins size={17} color={C.dawnSoft} />
+            <p className="mono text-base" style={{ color: C.paper }}>£{moneySaved} saved so far</p>
+          </div>
+        </div>
+
+        {/* Today's drink status */}
+        <div className="mt-4 rounded-2xl p-5" style={{ background: C.inkSoft, border: `1px solid ${C.line}` }}>
+          <p className="text-base font-semibold mb-3" style={{ color: C.paper }}>Today</p>
+          <div className="flex gap-2">
+            <button
+              onClick={() => updateToday({ drank: false })}
+              className="flex-1 rounded-xl py-2.5 text-base font-medium flex items-center justify-center gap-1.5"
+              style={{ background: !todayLog.drank ? C.field : "transparent", color: !todayLog.drank ? C.paper : C.fieldSoft, border: `1px solid ${C.fieldSoft}` }}
+            >
+              <Check size={16} /> Stayed clear
+            </button>
+            <button
+              onClick={() => updateToday({ drank: true })}
+              className="flex-1 rounded-xl py-2.5 text-base font-medium"
+              style={{ background: todayLog.drank ? C.rust : "transparent", color: todayLog.drank ? C.paper : "#C88A79", border: `1px solid #C88A79` }}
+            >
+              I drank
+            </button>
+          </div>
+          {todayLog.drank && (
+            <p className="mt-3 text-sm" style={{ color: C.paperDim }}>
+              That's one day — it doesn't erase {streakDays > 0 ? "what came before" : "your reasons for starting"}. The row resets, the decision to keep going doesn't.
+            </p>
+          )}
+        </div>
+
+        {/* Craving button */}
+        <button
+          onClick={() => { setReframeIdx(Math.floor(Math.random() * REFRAMES.length)); setReframeOpen(true); }}
+          className="mt-4 w-full rounded-2xl py-4 flex items-center justify-center gap-2 disp text-xl"
+          style={{ background: C.dawn, color: C.ink }}
+        >
+          <Flame size={20} /> Having a craving right now
+        </button>
+
+        {/* Tabs */}
+        <div className="mt-6 flex gap-1 rounded-full p-1" style={{ background: C.inkSoft }}>
+          {[
+            { id: "today", label: "Log", icon: Sun },
+            { id: "growth", label: "Growth", icon: Sprout },
+            { id: "history", label: "History", icon: LayoutGrid },
+            { id: "toolkit", label: "Toolkit", icon: BookOpen },
+          ].map((t) => (
+            <button
+              key={t.id}
+              onClick={() => setTab(t.id)}
+              className="flex-1 rounded-full py-2 text-sm font-medium flex items-center justify-center gap-1.5"
+              style={{ background: tab === t.id ? C.dawn : "transparent", color: tab === t.id ? C.ink : C.paperDim }}
+            >
+              <t.icon size={17} /> {t.label}
+            </button>
+          ))}
+        </div>
+
+        {/* Tab content */}
+        {tab === "today" && (
+          <div className="mt-5 space-y-4">
+            {/* Circadian rhythm */}
+            <div className="rounded-2xl p-5" style={{ background: C.inkSoft, border: `1px solid ${C.line}` }}>
+              <p className="text-base font-semibold mb-3 flex items-center gap-2" style={{ color: C.paper }}>
+                <Moon size={16} color={C.skySoft} /> Circadian rhythm
+              </p>
+              <div className="grid grid-cols-2 gap-3">
+                <label className="text-sm" style={{ color: C.paperDim }}>
+                  Bedtime
+                  <input type="time" value={todayLog.bedTime} onChange={(e) => updateToday({ bedTime: e.target.value })}
+                    className="mt-1 w-full rounded-lg px-2 py-1.5 text-base" style={{ background: C.ink, color: C.paper, border: `1px solid ${C.line}`, colorScheme: 'dark' }} />
+                </label>
+                <label className="text-sm" style={{ color: C.paperDim }}>
+                  Wake time
+                  <input type="time" value={todayLog.wakeTime} onChange={(e) => updateToday({ wakeTime: e.target.value })}
+                    className="mt-1 w-full rounded-lg px-2 py-1.5 text-base" style={{ background: C.ink, color: C.paper, border: `1px solid ${C.line}`, colorScheme: 'dark' }} />
+                </label>
+              </div>
+              <label className="text-sm block mt-3" style={{ color: C.paperDim }}>
+                Sleep quality {todayLog.sleepQuality ? `(${todayLog.sleepQuality}/5)` : ""}
+                <input type="range" min={1} max={5} step={1} value={todayLog.sleepQuality || 3}
+                  onChange={(e) => updateToday({ sleepQuality: Number(e.target.value) })}
+                  className="mt-2 w-full" />
+              </label>
+            </div>
+
+            {/* Gluten & digestion */}
+            <div className="rounded-2xl p-5" style={{ background: C.inkSoft, border: `1px solid ${C.line}` }}>
+              <p className="text-base font-semibold mb-1" style={{ color: C.paper }}>Gluten & digestion</p>
+              <p className="text-sm mb-3" style={{ color: C.paperDim }}>Tracking this properly, rather than assuming, is the only way to know if it's actually gluten.</p>
+              <div className="flex gap-2 mb-3">
+                <button onClick={() => updateToday({ ateGluten: true })}
+                  className="flex-1 rounded-xl py-2 text-sm font-medium"
+                  style={{ background: todayLog.ateGluten === true ? C.sky : "transparent", color: todayLog.ateGluten === true ? C.paper : C.skySoft, border: `1px solid ${C.skySoft}` }}>
+                  Ate gluten
+                </button>
+                <button onClick={() => updateToday({ ateGluten: false })}
+                  className="flex-1 rounded-xl py-2 text-sm font-medium"
+                  style={{ background: todayLog.ateGluten === false ? C.inkSoft : "transparent", color: C.paperDim, border: `1px solid ${C.line}` }}>
+                  Gluten-free day
+                </button>
+              </div>
+              <label className="text-sm block" style={{ color: C.paperDim }}>
+                Digestive discomfort {todayLog.glutenSymptoms !== null ? `(${todayLog.glutenSymptoms}/3)` : ""}
+                <input type="range" min={0} max={3} step={1} value={todayLog.glutenSymptoms ?? 0}
+                  onChange={(e) => updateToday({ glutenSymptoms: Number(e.target.value) })}
+                  className="mt-2 w-full" />
+              </label>
+            </div>
+
+            {/* Whole foods */}
+            <div className="rounded-2xl p-5" style={{ background: C.inkSoft, border: `1px solid ${C.line}` }}>
+              <p className="text-base font-semibold mb-1" style={{ color: C.paper }}>Mostly whole foods today?</p>
+              <div className="flex gap-2 mt-3">
+                <button onClick={() => updateToday({ wholeFoods: true })}
+                  className="flex-1 rounded-xl py-2 text-sm font-medium"
+                  style={{ background: todayLog.wholeFoods === true ? C.field : "transparent", color: todayLog.wholeFoods === true ? C.paper : C.fieldSoft, border: `1px solid ${C.fieldSoft}` }}>
+                  Yes
+                </button>
+                <button onClick={() => updateToday({ wholeFoods: false })}
+                  className="flex-1 rounded-xl py-2 text-sm font-medium"
+                  style={{ background: todayLog.wholeFoods === false ? C.inkSoft : "transparent", color: C.paperDim, border: `1px solid ${C.line}` }}>
+                  Not really
+                </button>
+              </div>
+            </div>
+
+            {/* Hara Hachi Bu */}
+            <div className="rounded-2xl p-5" style={{ background: C.inkSoft, border: `1px solid ${C.line}` }}>
+              <p className="text-base font-semibold mb-1" style={{ color: C.paper }}>Hara Hachi Bu</p>
+              <p className="text-sm mb-3" style={{ color: C.paperDim }}>Stopped eating at roughly 80% full today?</p>
+              <div className="flex gap-2">
+                <button onClick={() => updateToday({ haraHachiBu: true })}
+                  className="flex-1 rounded-xl py-2 text-sm font-medium"
+                  style={{ background: todayLog.haraHachiBu === true ? C.field : "transparent", color: todayLog.haraHachiBu === true ? C.paper : C.fieldSoft, border: `1px solid ${C.fieldSoft}` }}>
+                  Yes
+                </button>
+                <button onClick={() => updateToday({ haraHachiBu: false })}
+                  className="flex-1 rounded-xl py-2 text-sm font-medium"
+                  style={{ background: todayLog.haraHachiBu === false ? C.inkSoft : "transparent", color: todayLog.haraHachiBu === false ? C.paperDim : C.paperDim, border: `1px solid ${C.line}` }}>
+                  Not today
+                </button>
+              </div>
+            </div>
+
+            {/* Supplements */}
+            <div className="rounded-2xl p-5" style={{ background: C.inkSoft, border: `1px solid ${C.line}` }}>
+              <p className="text-base font-semibold mb-3 flex items-center gap-2" style={{ color: C.paper }}>
+                <Droplet size={16} color={C.fieldSoft} /> Supplements
+              </p>
+              <div className="space-y-2">
+                {SUPP_DEFAULTS.map((s) => {
+                  const on = !!todayLog.supplements[s.id];
+                  return (
+                    <button key={s.id} onClick={() => toggleSupplement(s.id)}
+                      className="w-full flex items-center justify-between rounded-lg px-3 py-2.5 text-base"
+                      style={{ background: on ? "rgba(75,93,69,0.25)" : C.ink, border: `1px solid ${on ? C.fieldSoft : C.line}`, color: on ? C.paper : C.paperDim }}>
+                      {s.label}
+                      {on && <Check size={16} color={C.fieldSoft} />}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Notes */}
+            <div className="rounded-2xl p-5" style={{ background: C.inkSoft, border: `1px solid ${C.line}` }}>
+              <p className="text-base font-semibold mb-2" style={{ color: C.paper }}>Notes</p>
+              <textarea value={todayLog.notes} onChange={(e) => updateToday({ notes: e.target.value })}
+                placeholder="Anything worth remembering about today"
+                rows={3} className="w-full rounded-lg px-3 py-2 text-base resize-none"
+                style={{ background: C.ink, color: C.paper, border: `1px solid ${C.line}`, colorScheme: 'dark' }} />
+            </div>
+
+            {/* Settings */}
+            <div className="rounded-2xl p-5" style={{ background: C.inkSoft, border: `1px solid ${C.line}` }}>
+              <p className="text-base font-semibold mb-3" style={{ color: C.paper }}>Settings</p>
+              <label className="text-sm block" style={{ color: C.paperDim }}>
+                Your name (used in the reframe prompt)
+                <input type="text" value={userName} onChange={(e) => setName(e.target.value)}
+                  placeholder="e.g. Adam"
+                  className="mt-1 w-full rounded-lg px-2 py-1.5 text-base" style={{ background: C.ink, color: C.paper, border: `1px solid ${C.line}`, colorScheme: 'dark' }} />
+              </label>
+              <label className="text-sm block" style={{ color: C.paperDim }}>
+                Clear-start date
+                <input type="date" value={quitDate} onChange={(e) => setQuit(e.target.value)}
+                  className="mt-1 w-full rounded-lg px-2 py-1.5 text-base" style={{ background: C.ink, color: C.paper, border: `1px solid ${C.line}`, colorScheme: 'dark' }} />
+              </label>
+              <label className="text-sm block mt-3" style={{ color: C.paperDim }}>
+                Typical weekly spend on alcohol (£)
+                <input type="number" value={weeklySpend} onChange={(e) => setSpend(Number(e.target.value) || 0)}
+                  className="mt-1 w-full rounded-lg px-2 py-1.5 text-base" style={{ background: C.ink, color: C.paper, border: `1px solid ${C.line}`, colorScheme: 'dark' }} />
+              </label>
+            </div>
+          </div>
+        )}
+
+        {tab === "growth" && (
+          <div className="mt-5 space-y-4">
+            <div className="rounded-2xl p-5" style={{ background: C.inkSoft, border: `1px solid ${C.line}` }}>
+              <p className="text-base font-semibold mb-1" style={{ color: C.paper }}>Today's reframe</p>
+              <p className="text-sm mb-3" style={{ color: C.paperDim }}>
+                Talking yourself through a hard moment in the third person — using your own name instead of "I" — measurably lowers stress and sharpens decisions, by putting a bit of distance between you and the thought.
+              </p>
+              <label className="text-sm block" style={{ color: C.paperDim }}>
+                What's on your mind
+                <textarea value={todayLog.monologueThought} onChange={(e) => updateToday({ monologueThought: e.target.value })}
+                  placeholder="The thought as it actually sounds in your head"
+                  rows={2} className="mt-1 w-full rounded-lg px-3 py-2 text-base resize-none"
+                  style={{ background: C.ink, color: C.paper, border: `1px solid ${C.line}`, colorScheme: 'dark' }} />
+              </label>
+              <label className="text-sm block mt-3" style={{ color: C.paperDim }}>
+                Now talk yourself through it
+                <textarea value={todayLog.monologueReframe} onChange={(e) => updateToday({ monologueReframe: e.target.value })}
+                  placeholder={userName ? `${userName}, here's what's actually true...` : "Your name, here's what's actually true..."}
+                  rows={2} className="mt-1 w-full rounded-lg px-3 py-2 text-base resize-none"
+                  style={{ background: C.ink, color: C.paper, border: `1px solid ${C.line}`, colorScheme: 'dark' }} />
+              </label>
+            </div>
+
+            <div className="rounded-2xl p-5" style={{ background: C.inkSoft, border: `1px solid ${C.line}` }}>
+              <p className="text-base font-semibold mb-3" style={{ color: C.paper }}>Today's checklist</p>
+              <div className="space-y-2">
+                {growthItems.map((g) => {
+                  const on = !!todayLog.growth[g.id];
+                  return (
+                    <div key={g.id} className="flex items-center gap-2">
+                      <button onClick={() => toggleGrowth(g.id)}
+                        className="flex-1 flex items-center justify-between rounded-lg px-3 py-2.5 text-sm text-left"
+                        style={{ background: on ? "rgba(75,93,69,0.25)" : C.ink, border: `1px solid ${on ? C.fieldSoft : C.line}`, color: on ? C.paper : C.paperDim }}>
+                        {g.label}
+                        {on && <Check size={16} color={C.fieldSoft} />}
+                      </button>
+                      <button onClick={() => removeGrowthItem(g.id)} style={{ color: C.paperDim }} className="px-1">
+                        <X size={16} />
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+              <div className="flex gap-2 mt-3">
+                <input value={newGrowthLabel} onChange={(e) => setNewGrowthLabel(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && addGrowthItem()}
+                  placeholder="Add your own habit"
+                  className="flex-1 rounded-lg px-3 py-2 text-sm" style={{ background: C.ink, color: C.paper, border: `1px solid ${C.line}`, colorScheme: 'dark' }} />
+                <button onClick={addGrowthItem} className="rounded-lg px-3 text-sm font-medium" style={{ background: C.dawn, color: C.ink }}>Add</button>
+              </div>
+            </div>
+            <p className="text-sm" style={{ color: C.paperDim }}>
+              These are here because who you're becoming matters as much as what you're stopping — kindness, sharpness, and the resources to build a good future are built the same way sobriety is: one deliberate day at a time.
+            </p>
+          </div>
+        )}
+
+        {tab === "history" && (
+          <div className="mt-5 rounded-2xl p-5" style={{ background: C.inkSoft, border: `1px solid ${C.line}` }}>
+            <p className="text-base font-semibold mb-4" style={{ color: C.paper }}>Last 14 days</p>
+            <div className="space-y-2">
+              {last14.slice().reverse().map(({ key, log }) => {
+                const d = new Date(key + "T00:00:00");
+                const label = d.toLocaleDateString("en-GB", { weekday: "short", day: "numeric", month: "short" });
+                return (
+                  <div key={key} className="flex items-center justify-between py-1.5" style={{ borderBottom: `1px solid ${C.line}` }}>
+                    <span className="text-sm" style={{ color: C.paperDim }}>{label}</span>
+                    <div className="flex items-center gap-2">
+                      {log?.sleepQuality && <span className="mono text-sm" style={{ color: C.skySoft }}>sleep {log.sleepQuality}/5</span>}
+                      {log?.growth && Object.values(log.growth).some(Boolean) && (
+                        <span className="mono text-sm" style={{ color: C.fieldSoft }}>
+                          {Object.values(log.growth).filter(Boolean).length}/{growthItems.length}
+                        </span>
+                      )}
+                      <span style={{ width: 8, height: 8, borderRadius: "50%", background: !log ? C.line : log.drank ? C.rust : C.dawn }} />
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+            <p className="text-sm mt-4" style={{ color: C.paperDim }}>Amber = clear · Rust = drank · Grey = no log</p>
+          </div>
+        )}
+
+        {tab === "toolkit" && (
+          <div className="mt-5 space-y-3">
+            <p className="text-sm mb-1" style={{ color: C.paperDim }}>
+              Reframes drawing on the reasoning behind Allen Carr's Easyway and William Porter's Alcohol Explained — the core idea in both is that alcohol creates the very craving and unease it then appears to relieve.
+            </p>
+            {REFRAMES.map((r, i) => (
+              <div key={i} className="rounded-2xl p-4" style={{ background: C.inkSoft, border: `1px solid ${C.line}` }}>
+                <p className="disp text-xl mb-1" style={{ color: C.dawnSoft }}>{r.title}</p>
+                <p className="text-base leading-relaxed" style={{ color: C.paperDim }}>{r.body}</p>
+              </div>
+            ))}
+
+            <p className="text-sm mt-6 mb-1" style={{ color: C.paperDim }}>Current research notes</p>
+            {RESEARCH_NOTES.map((r, i) => (
+              <div key={i} className="rounded-2xl p-4" style={{ background: C.inkSoft, border: `1px solid ${C.sky}` }}>
+                <p className="disp text-xl mb-1" style={{ color: C.skySoft }}>{r.title}</p>
+                <p className="text-base leading-relaxed" style={{ color: C.paperDim }}>{r.body}</p>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {error && (
+          <div className="text-sm mt-4 text-center" style={{ color: "#C88A79" }}>
+            <p>{error}</p>
+            <button onClick={() => doSave(pendingData.current || { quitDate, weeklySpend, logs, growthItems, userName })}
+              className="underline mt-1">Tap to retry saving</button>
+          </div>
+        )}
+      </div>
+
+      {/* Craving modal */}
+      {reframeOpen && (
+        <div className="fixed inset-0 flex items-end justify-center z-50" style={{ background: "rgba(0,0,0,0.6)" }} onClick={() => setReframeOpen(false)}>
+          <div onClick={(e) => e.stopPropagation()} className="w-full max-w-md rounded-t-3xl p-6 pb-10" style={{ background: C.paper }}>
+            <div className="flex justify-between items-start mb-4">
+              <Sprout size={20} color={C.field} />
+              <button onClick={() => setReframeOpen(false)}><X size={20} color={C.ink} /></button>
+            </div>
+            <p className="disp text-3xl mb-3" style={{ color: C.ink }}>{REFRAMES[reframeIdx].title}</p>
+            <p className="text-base leading-relaxed mb-6" style={{ color: C.inkSoft }}>{REFRAMES[reframeIdx].body}</p>
+            <button
+              onClick={() => setReframeIdx((reframeIdx + 1) % REFRAMES.length)}
+              className="w-full rounded-xl py-3 flex items-center justify-center gap-2 text-base font-medium"
+              style={{ background: C.ink, color: C.paper }}
+            >
+              Next <ChevronRight size={17} />
+            </button>
+            <p className="text-sm text-center mt-4" style={{ color: C.fieldSoft }}>
+              You just need to get past this wave. It's already passing.
+            </p>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---- Auth gate: simple magic-link email sign-in ----
+function AuthGate() {
+  const [session, setSession] = useState(undefined); // undefined = loading
+  const [email, setEmail] = useState("");
+  const [sent, setSent] = useState(false);
+  const [authError, setAuthError] = useState(null);
+
+  useEffect(() => {
+    supabaseClient.auth.getSession().then(({ data }) => setSession(data.session));
+    const { data: listener } = supabaseClient.auth.onAuthStateChange((_event, s) => setSession(s));
+    return () => listener.subscription.unsubscribe();
+  }, []);
+
+  const sendLink = async () => {
+    setAuthError(null);
+    const { error } = await supabaseClient.auth.signInWithOtp({
+      email,
+      options: { emailRedirectTo: window.location.href },
+    });
+    if (error) setAuthError(error.message);
+    else setSent(true);
+  };
+
+  if (session === undefined) {
+    return React.createElement(
+      "div",
+      { style: { background: "#1B2430", minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", color: "#EEE8DB" } },
+      "Loading…"
+    );
+  }
+
+  if (!session) {
+    return (
+      <div style={{ background: "#1B2430", minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }}>
+        <div style={{ maxWidth: 360, width: "100%" }}>
+          <p style={{ fontFamily: "serif", fontSize: 28, color: "#EEE8DB", marginBottom: 8 }}>Clear Track</p>
+          {sent ? (
+            <p style={{ color: "#E3DCCC", fontSize: 14 }}>
+              Check your email for a sign-in link, then come back to this page.
+            </p>
+          ) : (
+            <>
+              <p style={{ color: "#E3DCCC", fontSize: 14, marginBottom: 12 }}>Sign in with your email to sync your data.</p>
+              <input
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                placeholder="you@email.com"
+                style={{ width: "100%", padding: "10px 12px", borderRadius: 8, border: "1px solid rgba(255,255,255,0.2)", background: "#2A3644", color: "#EEE8DB", marginBottom: 10, fontSize: 15, boxSizing: "border-box" }}
+              />
+              <button
+                onClick={sendLink}
+                style={{ width: "100%", padding: "10px 12px", borderRadius: 8, background: "#C97B3D", color: "#1B2430", fontWeight: 600, border: "none", fontSize: 15 }}
+              >
+                Send sign-in link
+              </button>
+              {authError && <p style={{ color: "#C88A79", fontSize: 13, marginTop: 8 }}>{authError}</p>}
+            </>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  return <ClearTrack />;
+}
+
+try {
+  ReactDOM.createRoot(document.getElementById("root")).render(<AuthGate />);
+} catch (err) {
+  const box = document.getElementById("fatal-error");
+  box.style.display = "block";
+  box.textContent = "App failed to start:\n" + (err && err.stack ? err.stack : String(err));
+}
+</script>
+</body>
+</html>

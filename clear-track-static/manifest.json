@@ -1,0 +1,8 @@
+{
+  "name": "Clear Track",
+  "short_name": "Clear Track",
+  "start_url": ".",
+  "display": "standalone",
+  "background_color": "#1B2430",
+  "theme_color": "#1B2430"
+}

@@ -8,15 +8,23 @@
 <link rel="manifest" href="manifest.json" />
 <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
 <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-<script src="https://unpkg.com/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
-<script src="https://cdn.tailwindcss.com"></script>
+<script crossorigin="anonymous" src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<script crossorigin="anonymous" src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script crossorigin="anonymous" src="https://cdn.tailwindcss.com"></script>
 <style>
   body { margin:0; background:#1B2430; }
 </style>
 </head>
 <body>
 <div id="root"></div>
+<div id="fatal-error" style="display:none; padding:24px; color:#EEE8DB; font-family:monospace; font-size:14px; white-space:pre-wrap;"></div>
+<script>
+  window.addEventListener('error', function (e) {
+    var box = document.getElementById('fatal-error');
+    box.style.display = 'block';
+    box.textContent = 'Something failed to load:\n' + (e.message || e.error || 'unknown error');
+  });
+</script>
 
 <script>
 // ====== FILL THESE IN FROM YOUR SUPABASE PROJECT SETTINGS -> API ======
@@ -780,7 +788,13 @@ function AuthGate() {
   return <ClearTrack />;
 }
 
-ReactDOM.createRoot(document.getElementById("root")).render(<AuthGate />);
+try {
+  ReactDOM.createRoot(document.getElementById("root")).render(<AuthGate />);
+} catch (err) {
+  const box = document.getElementById("fatal-error");
+  box.style.display = "block";
+  box.textContent = "App failed to start:\n" + (err && err.stack ? err.stack : String(err));
+}
 </script>
 </body>
 </html>

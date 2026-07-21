@@ -43,9 +43,12 @@ const {
 // ---- tiny emoji-based icon stand-ins (no icon library needed) ----
 function mkIcon(glyph) {
   return function IconCmp({
-    size = 16
+    size = 16,
+    className = "",
+    color
   }) {
     return React.createElement("span", {
+      className: className,
       style: {
         fontSize: size,
         lineHeight: 1,
@@ -250,6 +253,18 @@ const GROWTH_DEFAULTS = [{
 }, {
   id: "present",
   label: "Present time with someone who matters, phone away"
+}, {
+  id: "deepwork",
+  label: "Completed one deep-work block before checking phone"
+}, {
+  id: "priority",
+  label: "Did the single most important task first, not the easiest"
+}, {
+  id: "invest",
+  label: "Invested time or money toward a long-term goal"
+}, {
+  id: "skill",
+  label: "Practiced a skill that compounds over time"
 }];
 function emptyDay() {
   return {
